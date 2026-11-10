@@ -1,0 +1,146 @@
+from typing import Dict, List
+#dictionary what has EventID --> EventType
+#https://medium.com/@AllDaySOC/threat-hunting-using-sysmon-events-6d5320275593
+
+CATEGORY_IDS = {
+    "process_creation": [1],
+    "file_change": [2],
+    "network_connection": [3],
+    "process_termination": [5],
+    "driver_load": [6],
+    "image_load": [7],
+    "create_remote_thread": [8],
+    "raw_access_thread": [9],
+    "process_access": [10],
+    "file_event": [11],
+    "registry_add": [12],
+    "registry_delete": [12],
+    "registry_event": [12, 13, 14],
+    "registry_set": [13],
+    "create_stream_hash": [15],
+    "pipe_created": [17, 18],
+    "wmi_event": [19, 20, 21],
+    "dns_query": [22],
+    "file_delete": [23, 26],
+    "process_tampering": [25],
+    "file_executable_detected": [29],
+}
+
+SYSMON_CHANNEL = "Microsoft-Windows-Sysmon/Operational"
+SECURITY_CHANNEL = "Security"
+
+#i didn't introduce in the dictionary all the possible service values
+#https://github.com/SigmaHQ/sigma-specification/blob/main/specification/sigma-appendix-taxonomy.md#service-1
+SERVICE_CHANNELS = {
+    "security": (SECURITY_CHANNEL,),
+    "sysmon": (SYSMON_CHANNEL,),
+    "system": ("System",),
+    "application": ("Application",),
+    "powershell": ("Microsoft-Windows-PowerShell/Operational",),
+    "powershell-classic": ("Windows PowerShell",),
+    "taskscheduler": ("Microsoft-Windows-TaskScheduler/Operational",),
+    "wmi": ("Microsoft-Windows-WMI-Activity/Operational",),
+    "dns-server": ("DNS Server",),
+    "driver-framework": ("Microsoft-Windows-DriverFrameworks-UserMode/Operational",),
+    "ntlm": ("Microsoft-Windows-NTLM/Operational",),
+    "bits-client": ("Microsoft-Windows-Bits-Client/Operational",),
+    "windefend": ("Microsoft-Windows-Windows Defender/Operational",),
+    "codeintegrity-operational": ("Microsoft-Windows-CodeIntegrity/Operational",),
+    "terminalservices-localsessionmanager": (
+        "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",),
+    "dhcp": ("Microsoft-Windows-DHCP-Server/Operational",),
+    "applocker": (
+    "Microsoft-Windows-AppLocker/MSI and Script",
+    "Microsoft-Windows-AppLocker/EXE and DLL",
+    "Microsoft-Windows-AppLocker/Packaged app-Deployment",
+    "Microsoft-Windows-AppLocker/Packaged app-Execution",),
+        "appxdeployment-server": ("Microsoft-Windows-AppXDeployment-Server/Operational",),
+    "firewall-as": ("Microsoft-Windows-Windows Firewall With Advanced Security/Firewall",),
+    "msexchange-management": ("MSExchange Management",),
+    "dns-client": ("Microsoft-Windows-DNS Client Events/Operational",),
+    "iis-configuration": ("Microsoft-IIS-Configuration/Operational",),
+    "security-mitigations": (
+        "Microsoft-Windows-Security-Mitigations/Kernel Mode",
+        "Microsoft-Windows-Security-Mitigations/User Mode",),
+    "appmodel-runtime": ("Microsoft-Windows-AppModel-Runtime/Admin",),
+    "appxpackaging-om": ("Microsoft-Windows-AppxPackaging/Operational",),
+    "capi2": ("Microsoft-Windows-CAPI2/Operational",),
+    "certificateservicesclient-lifecycle-system": (
+        "Microsoft-Windows-CertificateServicesClient-Lifecycle-System/Operational",),
+    "diagnosis-scripted": ("Microsoft-Windows-Diagnosis-Scripted/Operational",),
+    "ldap": ("Microsoft-Windows-LDAP-Client/Debug",),
+    "lsa-server": ("Microsoft-Windows-LSA/Operational",),
+    "openssh": ("OpenSSH/Operational",),
+    "microsoft-servicebus-client": ("Microsoft-ServiceBus-Client",),
+    "shell-core": ("Microsoft-Windows-Shell-Core/Operational",),
+    "smbclient-security": ("Microsoft-Windows-SmbClient/Security",),
+    "smbserver-connectivity": ("Microsoft-Windows-SMBServer/Connectivity",),
+}
+
+# Bidirectional aliases between Sigma generic fields and Elastic Common Schema (ECS)
+FIELD_ALIASES: Dict[str, List[str]] = {
+    # Process
+    "Image": ["process.executable", "process.name"],
+    "NewProcessName": ["process.executable", "process.name"],
+    "ProcessName": ["process.name", "process.executable"],
+    "CommandLine": ["process.command_line"],
+    "ProcessCommandLine": ["process.command_line"],
+    "ParentImage": ["process.parent.executable", "process.parent.name"],
+    "ParentProcessName": ["process.parent.name", "process.parent.executable"],
+    "ParentCommandLine": ["process.parent.command_line"],
+    "ProcessId": ["process.pid"],
+    "NewProcessId": ["process.pid"],
+    "ParentProcessId": ["process.parent.pid"],
+    "ProcessGuid": ["process.entity_id"],
+    "ParentProcessGuid": ["process.parent.entity_id"],
+    "CurrentDirectory": ["process.working_directory"],
+    "Hashes": ["process.hash"],
+    "OriginalFileName": ["process.pe.original_file_name"],
+    "Company": ["process.code_signature.subject_name"],
+    "Product": ["process.name"],
+    "Description": ["process.title"],
+    #user
+    "User": ["user.name", "user.target.name"],
+    "UserName": ["user.name"],
+    "AccountName": ["user.name"],
+    "SubjectUserName": ["user.name"],
+    "TargetUserName": ["user.target.name", "user.name"],
+    "Domain": ["user.domain"],
+    "AccountDomain": ["user.domain"],
+    "SubjectDomainName": ["user.domain"],
+    "TargetDomainName": ["user.target.domain", "user.domain"],
+    "SubjectUserSid": ["user.id"],
+    "TargetUserSid": ["user.target.id"],
+    "LogonId": ["winlog.logon.id"],
+    "TargetLogonId": ["winlog.target_logon.id"],
+    #system/host
+    "EventID": ["winlog.event_id", "event.code"],
+    "Channel": ["winlog.channel"],
+    "Hostname": ["host.name", "host.hostname"],
+    "ComputerName": ["host.name", "winlog.computer_name"],
+    "Computer": ["host.name", "winlog.computer_name"],
+    "WorkstationName": ["source.domain"],
+    #network
+    "SourceIp": ["source.ip", "client.ip"],
+    "SourceAddress": ["source.ip", "client.ip"],
+    "IpAddress": ["source.ip", "client.ip"],
+    "DestinationIp": ["destination.ip", "server.ip"],
+    "DestAddress": ["destination.ip", "server.ip"],
+    "SourcePort": ["source.port", "client.port"],
+    "IpPort": ["source.port", "client.port"],
+    "DestinationPort": ["destination.port", "server.port"],
+    "DestPort": ["destination.port", "server.port"],
+    "SourceHostname": ["source.domain"],
+    "DestinationHostname": ["destination.domain"],
+    "Protocol": ["network.transport"],
+    #file and registry
+    "TargetFilename": ["file.path", "file.name"],
+    "FileName": ["file.path", "file.name"],
+    "ImageLoaded": ["file.path"],
+    "TargetObject": ["registry.path"],
+    "Details": ["registry.value"],
+    #powershell
+    "ScriptBlockText": ["powershell.file.script_block_text"],
+    "Payload": ["powershell.file.script_block_text"],
+    "HostApplication": ["process.command_line"],
+}

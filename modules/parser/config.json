@@ -1,0 +1,12 @@
+{
+    "opensearch":{
+        "enabled": false,
+        "url": "http://localhost:9200",
+        "alerts_index": "hids-alerts",
+        "username": null,
+        "password": null,
+        "bearer_token": null,
+        "input_index": "winlogbeat-*",
+        "slices": 2
+    }
+}

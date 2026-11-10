@@ -1,0 +1,5 @@
+.postman/
+postman/
+__pycache__/
+data/alerts/
+modules/opensearch/test_os.py

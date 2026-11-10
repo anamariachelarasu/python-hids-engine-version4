@@ -1,0 +1,95 @@
+name: opensearch_custom
+priority: 100
+transformations:
+  - id: opensearch_field_mapping
+    type: field_name_mapping
+    mapping:
+      # Process Fields
+      Image: process.executable
+      NewProcessName: process.executable
+      ProcessName: process.name
+      CommandLine: process.command_line
+      ProcessCommandLine: process.command_line
+      ParentImage: process.parent.executable
+      ParentProcessName: process.parent.name
+      ParentCommandLine: process.parent.command_line
+      ProcessId: process.pid
+      NewProcessId: process.pid
+      ParentProcessId: process.parent.pid
+      ProcessGuid: process.entity_id
+      ParentProcessGuid: process.parent.entity_id
+      CurrentDirectory: process.working_directory
+      Hashes: process.hash
+      imphash: process.pe.imphash
+      Company: process.code_signature.subject_name
+      Product: process.name
+      Description: process.title
+      OriginalFileName: process.pe.original_file_name
+      IntegrityLevel: winlog.event_data.IntegrityLevel
+      # User & Authentication Fields
+      User: user.name
+      UserName: user.name
+      AccountName: user.name
+      SubjectUserName: user.name
+      TargetUserName: user.target.name
+      AccountDomain: user.domain
+      SubjectDomainName: user.domain
+      TargetDomainName: user.target.domain
+      SubjectUserSid: user.id
+      TargetUserSid: user.target.id
+      LogonId: winlog.logon.id
+      TargetLogonId: winlog.target_logon.id
+      LogonGuid: winlog.logon.guid
+      # Host & System Fields
+      ComputerName: host.name
+      Computer: host.name
+      Hostname: host.name
+      WorkstationName: source.domain
+      #files
+      TargetFilename: file.path
+      FileName: file.path
+      ImageLoaded: file.path
+      Signed: file.code_signature.signed
+      SignatureStatus: file.code_signature.status
+      #network
+      SourceIp: source.ip
+      SourceAddress: source.ip
+      IpAddress: source.ip
+      DestinationIp: destination.ip
+      DestAddress: destination.ip
+      SourcePort: source.port
+      IpPort: source.port
+      DestinationPort: destination.port
+      DestPort: destination.port
+      SourceHostname: source.domain
+      DestinationHostname: destination.domain
+      ClientAddress: source.ip
+      ClientName: source.domain
+      Protocol: network.transport
+      #registry
+      TargetObject: registry.path
+      Details: registry.value
+      NewName: registry.value
+      #events and win log fields
+      EventID: winlog.event_id
+      Channel: winlog.channel
+      Provider_Name: winlog.provider_name
+      EventType: event.action
+      RuleName: rule.name
+      #powershell fields
+      ScriptBlockText: powershell.file.script_block_text
+      Payload: powershell.file.script_block_text
+      HostApplication: process.command_line
+      ScriptBlockId: powershell.file.script_block_id
+  #prefix any unmapped windows-specific fields with winlog.event_data.
+  - id: event_data_prefix
+    type: field_name_prefix
+    prefix: "winlog.event_data."
+    field_name_conditions:
+      - type: processing_item_applied
+        processing_item_id: opensearch_field_mapping
+      - type: include_fields
+        fields:
+          - "\\w+\\."
+        mode: re
+    field_name_cond_not: true
