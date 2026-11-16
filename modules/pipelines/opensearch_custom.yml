@@ -1,10 +1,84 @@
+#newly improved mapping based on pysigma default mapping for fields
 name: opensearch_custom
 priority: 100
 transformations:
+  # 1. variable logsource mappings (process creation vs image load vs sysmon/powershell)
+  - id: opensearch_variable_process_creation
+    type: field_name_mapping
+    rule_conditions:
+      - type: logsource
+        product: windows
+        category: process_creation
+    mapping:
+      FileVersion: process.pe.file_version
+      Description: process.pe.description
+      Product: process.pe.product
+      Company: process.pe.company
+      OriginalFileName: process.pe.original_file_name
+      CommandLine: process.command_line
+
+  - id: opensearch_variable_image_load
+    type: field_name_mapping
+    rule_conditions:
+      - type: logsource
+        product: windows
+        category: image_load
+    mapping:
+      FileVersion: file.pe.file_version
+      Description: file.pe.description
+      Product: file.pe.product
+      Company: file.pe.company
+      OriginalFileName: file.pe.original_file_name
+
+  - id: opensearch_variable_driver_image_loaded
+    type: field_name_mapping
+    rule_conditions:
+      - type: logsource
+        product: windows
+        category: driver_loaded
+    mapping:
+      Signature: file.code_signature.subject_name
+
+  - id: opensearch_variable_image_loaded_sig
+    type: field_name_mapping
+    rule_conditions:
+      - type: logsource
+        product: windows
+        category: image_loaded
+    mapping:
+      Signature: file.code_signature.subject_name
+
+  - id: opensearch_variable_powershell_classic
+    type: field_name_mapping
+    rule_conditions:
+      - type: logsource
+        product: windows
+        service: powershell-classic
+    mapping:
+      CommandLine: powershell.command.value
+      EngineVersion: powershell.engine.version
+      HostVersion: powershell.process.executable_version
+
+  - id: opensearch_variable_security_service
+    type: field_name_mapping
+    rule_conditions:
+      - type: logsource
+        product: windows
+        service: security
+    mapping:
+      CommandLine: process.command_line
+      SubjectLogonId: winlog.logon.id
+      ServiceName: service.name
+      SubjectDomainName: user.domain
+      SubjectUserName: user.name
+      SubjectUserSid: user.id
+      TargetLogonId: winlog.logon.id
+
+  # 2. global static field mappings (contains existing mappings + all missing ecs_windows fields)
   - id: opensearch_field_mapping
     type: field_name_mapping
     mapping:
-      # Process Fields
+      # process fields
       Image: process.executable
       NewProcessName: process.executable
       ProcessName: process.name
@@ -21,12 +95,18 @@ transformations:
       CurrentDirectory: process.working_directory
       Hashes: process.hash
       imphash: process.pe.imphash
+      Imphash: file.pe.imphash
       Company: process.code_signature.subject_name
       Product: process.name
       Description: process.title
       OriginalFileName: process.pe.original_file_name
       IntegrityLevel: winlog.event_data.IntegrityLevel
-      # User & Authentication Fields
+      SourceProcessGuid: process.entity_id
+      SourceProcessId: process.pid
+      SourceImage: process.executable
+      SourceThreadId: process.thread.id
+
+      # user & authentication fields
       User: user.name
       UserName: user.name
       AccountName: user.name
@@ -40,18 +120,25 @@ transformations:
       LogonId: winlog.logon.id
       TargetLogonId: winlog.target_logon.id
       LogonGuid: winlog.logon.guid
-      # Host & System Fields
+
+      # host & system fields
       ComputerName: host.name
       Computer: host.name
       Hostname: host.name
       WorkstationName: source.domain
-      #files
+
+      # file fields
       TargetFilename: file.path
       FileName: file.path
       ImageLoaded: file.path
       Signed: file.code_signature.signed
       SignatureStatus: file.code_signature.status
-      #network
+      Device: file.path
+      PipeName: file.name
+      IsExecutable: sysmon.file.is_executable
+      Archived: sysmon.file.archived
+
+      # network fields
       SourceIp: source.ip
       SourceAddress: source.ip
       IpAddress: source.ip
@@ -61,27 +148,52 @@ transformations:
       IpPort: source.port
       DestinationPort: destination.port
       DestPort: destination.port
+      DestinationPortName: network.protocol
       SourceHostname: source.domain
       DestinationHostname: destination.domain
       ClientAddress: source.ip
       ClientName: source.domain
       Protocol: network.transport
-      #registry
+      Initiated: network.direction
+
+      # registry fields
       TargetObject: registry.path
       Details: registry.value
       NewName: registry.value
-      #events and win log fields
+
+      # event & winlog fields
       EventID: winlog.event_id
       Channel: winlog.channel
       Provider_Name: winlog.provider_name
       EventType: event.action
       RuleName: rule.name
-      #powershell fields
+      SequenceNumber: event.sequence
+
+      # powershell & sysmon/dns fields
       ScriptBlockText: powershell.file.script_block_text
       Payload: powershell.file.script_block_text
       HostApplication: process.command_line
       ScriptBlockId: powershell.file.script_block_id
-  #prefix any unmapped windows-specific fields with winlog.event_data.
+      CommandName: powershell.command.name
+      CommandPath: powershell.command.path
+      CommandType: powershell.command.type
+      HostId: process.entity_id
+      HostName: process.title
+      NewEngineState: powershell.engine.new_state
+      PipelineId: powershell.pipeline_id
+      PreviousEngineState: powershell.engine.previous_state
+      RunspaceId: powershell.runspace_id
+      ScriptName: file.path
+      NewProviderState: powershell.provider.new_state
+      ProviderName: powershell.provider.name
+      MessageNumber: powershell.sequence
+      MessageTotal: powershell.total
+      QueryName: dns.question.name
+      QueryStatus: sysmon.dns.status
+      Destination: process.executable
+      Application: process.executable
+
+  # 3. prefix unmapped fields with winlog.event_data.
   - id: event_data_prefix
     type: field_name_prefix
     prefix: "winlog.event_data."

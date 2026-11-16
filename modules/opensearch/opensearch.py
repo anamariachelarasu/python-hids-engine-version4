@@ -4,8 +4,10 @@ from modules.parser.events import read_events
 import orjson
 import requests
 from requests.auth import HTTPBasicAuth
+from urllib3.util.retry import Retry
 
 import queue
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger(__name__)
@@ -47,13 +49,24 @@ HIDS_ALERTS_MAPPING = {
 class OpenSearchConnector:
     def __init__(self, url: str = "http://localhost:9200", index_name: str = "hids-alerts", username: Optional[str] = None,
                  password: Optional[str] = None, bearer_token: Optional[str] = None, client_cert: Optional[str] = None,
-                 client_key: Optional[str] = None, verify_ssl: bool = False, timeout: int = 60):
+                 client_key: Optional[str] = None, verify_ssl: bool = False, timeout: int = 90, pool_size=50):
         
         self.url = url.rstrip("/")
         self.index_name = index_name
         self.timeout = timeout
         self.session = requests.Session()
+
+        #configure retry policy for transient errors and search queue saturation  (http 429)
+        #include POST because opensearch _search and _bulk endpoints use POST
+        retry_strategy = Retry(total=3, backoff_factor=0.5, allowed_methods=["HEAD", "GET", "POST", "DELETE", "PUT"], status_forcelist=[429, 502, 503, 504], raise_on_status=False)
+
+        #size the connection pool to match concurrent worker threads
+        adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size, max_retries=retry_strategy,)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         self.session.verify = verify_ssl
+
+
 
         if bearer_token:
             self.session.headers.update({"Authorization": f"Bearer {bearer_token}"})
@@ -65,6 +78,8 @@ class OpenSearchConnector:
 
         self.session.headers.update({"Content-Type": "application/json"})
         self.buffer: List[Dict[str, Any]] = []
+        #lock for thread-safe access to alert buffer
+        self._buffer_lock = threading.Lock()
 
     def __enter__(self):
         return self
@@ -131,20 +146,31 @@ class OpenSearchConnector:
     #append the alert in the list and checks if the list is full
     #returns number of successfully sent alerts
     def buffer_alert(self, alert_dict: Dict[str, Any], batch_size: int = 100) -> int:
-        self.buffer.append(alert_dict)
-        if len(self.buffer) >= batch_size:
+        should_flush = False
+        #protect buffer writes and length check across concurrent threads
+        with self._buffer_lock:
+            self.buffer.append(alert_dict)
+            if len(self.buffer) >= batch_size:
+                should_flush = True
+
+        if should_flush:
             return self.flush()
         return 0
 
     def flush(self) -> int:
-        #empty buffer
-        if not self.buffer:
-            return 0
+        #copy and clear the buffer automatically so network i/o doesn't block other threads
+        with self._buffer_lock:
+            #empty buffer
+            if not self.buffer:
+                return 0
+            batch = list(self.buffer)
+            self.buffer.clear()
+
 
         #build the NDJSON body --> doing this because _bulk doen't accept a normal JSON
         action_header = orjson.dumps({"index": {"_index": self.index_name}})
         lines: List[bytes] = []
-        for alert in self.buffer:
+        for alert in batch:
             lines.append(action_header)
             lines.append(orjson.dumps(alert))
 
@@ -152,7 +178,7 @@ class OpenSearchConnector:
         bulk_data = b"\n".join(lines) + b"\n"
 
         #we send the request
-        count = len(self.buffer)
+        count = len(batch)
         try:
             #we overwrite the ({"Content-Type": "application/json"})
             res = self.session.post(f"{self.url}/_bulk", data=bulk_data, headers={"Content-Type": "application/x-ndjson"}, timeout=self.timeout,)
@@ -176,8 +202,6 @@ class OpenSearchConnector:
             ok = count - len(failed)
         else:
             ok = count
-
-        self.buffer.clear()
         return ok
 
     def query_events(self, index_pattern: str="winlogbeat-*", query: Optional[Dict[str, Any]] = None, size: int = 500,
@@ -256,18 +280,22 @@ class OpenSearchConnector:
 
     #POST /{index}/_search
     #sends the generated query and receives hits(for atomic rules) and aggregations(for correlation rules)
-    def search(self, index_name: str, query_body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def search(self, index_name: str, query_body: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self.url}/{index_name}/_search"
         try:
+            #load to send the request 
             res = self.session.post(url, data=orjson.dumps(query_body), timeout=self.timeout)
-            if res.status_code == 200:
-                return res.json()
-            else:
-                log.error(f"Search failed on {index_name} (HTTP {res.status_code}): {res.text}")
-                return None
         except requests.RequestException as e:
-            log.error(f"Search network error on {index_name}: {e}")
-            return None
+            raise RuntimeError(f"network error on {index_name}: {e}") from e
+
+        if res.status_code == 200:
+            return res.json()
+
+        #server respondedm but with an error code (like 400, 404)
+        #truncate verbose opensearch shard/parsing error payloads in logs
+        err_preview = res.text[:300]
+        log.error(f"Search failed on {index_name} (HTTP {res.status_code}): {err_preview}")
+        raise RuntimeError(f"opensearch returned http {res.status_code}: {err_preview}")
 
     #POST {self.url}/_bulk
     #loads through _bulk a local dataset file in event index in opensearch (windows-events for example)
@@ -280,21 +308,18 @@ class OpenSearchConnector:
             lines.append(header)
             lines.append(orjson.dumps(event))
 
+            # sends when we have a full batch
             if len(lines) >= batch_size * 2:
                 bulk_data = b"\n".join(lines) + b"\n"
+                self.session.post(f"{self.url}/_bulk", data=bulk_data, headers={"Content-Type": "application/x-ndjson"}, timeout=self.timeout)
+                total += len(lines) // 2
+                lines.clear()
 
-                try: 
-                    self.session.post(f"{self.url}/_bulk", data=bulk_data, headers={"Content-Type": "application/x-ndjson"}, timeout=self.timeout)
-                    total += len(lines) // 2
-                except Exception as e:
-                    log.error(f"Ingest batch failed: {e}")
-                lines.clear()
-            if lines:
-                bulk_data = b"\n".join(lines) + b"\n"
-                try:
-                    self.session.post(f"{self.url}/_bulk", data=bulk_data, headers={"Content-Type": "application/x-ndjson"}, timeout=self.timeout)
-                    total += len(lines) // 2
-                except Exception as e:
-                    log.error(f"Ingest batch failed: {e}")
-                lines.clear()
+        # sends the remaining content
+        if lines:
+            bulk_data = b"\n".join(lines) + b"\n"
+            self.session.post(f"{self.url}/_bulk", data=bulk_data, headers={"Content-Type": "application/x-ndjson"}, timeout=self.timeout)
+            total += len(lines) // 2
+            lines.clear()
+
         return total

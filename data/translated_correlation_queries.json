@@ -1,208 +1,10 @@
 {
   "summary": {
-    "total_loaded": 4,
-    "translated_count": 4,
+    "total_loaded": 2,
+    "translated_count": 2,
     "timeframe_exported": "now-15m"
   },
   "translated_correlation_rules": [
-    {
-      "title": "Multiple Failed Logons Potential Brute Force",
-      "id": "5b4c1000-0000-0000-0000-000000000001",
-      "name": "multiple_failed_logons_brute_force",
-      "level": "high",
-      "correlation_type": "event_count",
-      "timespan": "5m",
-      "threshold_count": 5,
-      "rule_references": [
-        "9eb99343-d336-4020-a3cd-67f3819e68ee"
-      ],
-      "group_by": [
-        "TargetUserName",
-        "Hostname"
-      ],
-      "group_by_ecs_mapping": {
-        "TargetUserName": "user.target.name",
-        "Hostname": "host.name"
-      },
-      "source_path": "rules\\sigma\\correlation\\correlation_failed_logon_brute_force.yml",
-      "query": {
-        "size": 0,
-        "query": {
-          "bool": {
-            "filter": [
-              {
-                "range": {
-                  "@timestamp": {
-                    "gte": "all",
-                    "lte": "now"
-                  }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "9eb99343-d336-4020-a3cd-67f3819e68ee"
-                  ]
-                }
-              }
-            ]
-          }
-        },
-        "aggs": {
-          "correlation_buckets": {
-            "multi_terms": {
-              "terms": [
-                {
-                  "field": "user.target.name.keyword"
-                },
-                {
-                  "field": "host.name.keyword"
-                }
-              ],
-              "min_doc_count": 5
-            }
-          }
-        }
-      },
-      "query_with_timespan": {
-        "size": 0,
-        "query": {
-          "bool": {
-            "filter": [
-              {
-                "range": {
-                  "@timestamp": {
-                    "gte": "now-5m",
-                    "lte": "now"
-                  }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "9eb99343-d336-4020-a3cd-67f3819e68ee"
-                  ]
-                }
-              }
-            ]
-          }
-        },
-        "aggs": {
-          "correlation_buckets": {
-            "multi_terms": {
-              "terms": [
-                {
-                  "field": "user.target.name.keyword"
-                },
-                {
-                  "field": "host.name.keyword"
-                }
-              ],
-              "min_doc_count": 5
-            }
-          }
-        }
-      }
-    },
-    {
-      "title": "Multiple Failed Logons Potential Password spraying",
-      "id": "5b4c1000-0000-0000-0000-000000000002",
-      "name": "multiple_failed_logons_password_spraying",
-      "level": "high",
-      "correlation_type": "event_count",
-      "timespan": "5m",
-      "threshold_count": 10,
-      "rule_references": [
-        "9eb99343-d336-4020-a3cd-67f3819e68ee"
-      ],
-      "group_by": [
-        "Hostname",
-        "IpAddress"
-      ],
-      "group_by_ecs_mapping": {
-        "Hostname": "host.name",
-        "IpAddress": "source.ip"
-      },
-      "source_path": "rules\\sigma\\correlation\\correlation_password_spraying.yml",
-      "query": {
-        "size": 0,
-        "query": {
-          "bool": {
-            "filter": [
-              {
-                "range": {
-                  "@timestamp": {
-                    "gte": "all",
-                    "lte": "now"
-                  }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "9eb99343-d336-4020-a3cd-67f3819e68ee"
-                  ]
-                }
-              }
-            ]
-          }
-        },
-        "aggs": {
-          "correlation_buckets": {
-            "multi_terms": {
-              "terms": [
-                {
-                  "field": "host.name.keyword"
-                },
-                {
-                  "field": "source.ip.keyword"
-                }
-              ],
-              "min_doc_count": 10
-            }
-          }
-        }
-      },
-      "query_with_timespan": {
-        "size": 0,
-        "query": {
-          "bool": {
-            "filter": [
-              {
-                "range": {
-                  "@timestamp": {
-                    "gte": "now-5m",
-                    "lte": "now"
-                  }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "9eb99343-d336-4020-a3cd-67f3819e68ee"
-                  ]
-                }
-              }
-            ]
-          }
-        },
-        "aggs": {
-          "correlation_buckets": {
-            "multi_terms": {
-              "terms": [
-                {
-                  "field": "host.name.keyword"
-                },
-                {
-                  "field": "source.ip.keyword"
-                }
-              ],
-              "min_doc_count": 10
-            }
-          }
-        }
-      }
-    },
     {
       "title": "Bruteforce via password reset Count",
       "id": null,
@@ -225,23 +27,7 @@
         "size": 0,
         "query": {
           "bool": {
-            "filter": [
-              {
-                "range": {
-                  "@timestamp": {
-                    "gte": "all",
-                    "lte": "now"
-                  }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "bruteforce_password_reset"
-                  ]
-                }
-              }
-            ]
+            "filter": []
           }
         },
         "aggs": {
@@ -268,13 +54,6 @@
                     "gte": "now-10m",
                     "lte": "now"
                   }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "bruteforce_password_reset"
-                  ]
                 }
               }
             ]
@@ -310,31 +89,15 @@
         "TargetDomainName"
       ],
       "group_by_ecs_mapping": {
-        "TargetUserName": "user.target.name",
-        "TargetDomainName": "user.target.domain"
+        "TargetUserName": "TargetUserName",
+        "TargetDomainName": "TargetDomainName"
       },
       "source_path": "rules\\sigma\\correlation\\windows_failed_login_single_user.yml",
       "query": {
         "size": 0,
         "query": {
           "bool": {
-            "filter": [
-              {
-                "range": {
-                  "@timestamp": {
-                    "gte": "all",
-                    "lte": "now"
-                  }
-                }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "failed_logon"
-                  ]
-                }
-              }
-            ]
+            "filter": []
           }
         },
         "aggs": {
@@ -342,10 +105,10 @@
             "multi_terms": {
               "terms": [
                 {
-                  "field": "user.target.name.keyword"
+                  "field": "TargetUserName.keyword"
                 },
                 {
-                  "field": "user.target.domain.keyword"
+                  "field": "TargetDomainName.keyword"
                 }
               ],
               "min_doc_count": 10
@@ -365,13 +128,6 @@
                     "lte": "now"
                   }
                 }
-              },
-              {
-                "terms": {
-                  "rule.name.keyword": [
-                    "failed_logon"
-                  ]
-                }
               }
             ]
           }
@@ -381,10 +137,10 @@
             "multi_terms": {
               "terms": [
                 {
-                  "field": "user.target.name.keyword"
+                  "field": "TargetUserName.keyword"
                 },
                 {
-                  "field": "user.target.domain.keyword"
+                  "field": "TargetDomainName.keyword"
                 }
               ],
               "min_doc_count": 10

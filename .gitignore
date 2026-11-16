@@ -3,3 +3,5 @@ postman/
 __pycache__/
 data/alerts/
 modules/opensearch/test_os.py
+modules/parser/correlation_rules.py
+windows.py

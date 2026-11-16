@@ -1,0 +1,25 @@
+title: Sysmon Process Access Event
+name: sysmon_process_access
+description: Detects Windows process access events via Sysmon Event ID 10.
+logsource:
+    category: process_access
+    product: windows
+detection:
+    selection:
+        EventID: 10
+    condition: selection
+---
+title: Repeated Process Access Detected
+name: repeated_process_access
+description: Detects repeated process access activity from a source image targeting another process within a short timeframe.
+level: high
+correlation:
+    type: event_count
+    rules:
+        - sysmon_process_access
+    group-by:
+        - SourceImage
+        - TargetImage
+    timespan: 5m
+    condition:
+        gte: 20

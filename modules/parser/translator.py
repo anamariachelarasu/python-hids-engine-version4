@@ -73,11 +73,17 @@ def translate_atomic_rule(rule: SigmaRule, timeframe: str = "now-15m", size: int
         parts: List[str] = []
         for i in range(len(query_strings)): #bp
             parts.append("(" + query_strings[i] + ")")
-        if parts <= MAX_CLAUSES:
+        #check the number of generated query parts against a maximum allowed clauses
+        if len(parts) <= MAX_CLAUSES:
             full_query = " OR ".join(parts)
         else:
             print(f"{rule.title} is exceeding the number of maximum clauses")
             return None
+        
+    # guard against massive Lucene queries whose wildcard expansion exceeds Lucene's 10240 nested clause limit
+    if len(full_query) > 25000:
+        print(f"{rule.title} skipped: query length ({len(full_query)} chars) exceeds safe Lucene clause limit")
+        return None
 
     #step 3 -- build filters list
     filters: List[Dict[str, Any]] = [
@@ -100,7 +106,7 @@ def translate_atomic_rule(rule: SigmaRule, timeframe: str = "now-15m", size: int
             }
         })
 
-    #step 3 -- construct opensearch Query DSL
+    #step 4 -- construct opensearch Query DSL
     query_body: Dict[str, Any] = {
         "size": size,
         "query": {
@@ -112,10 +118,12 @@ def translate_atomic_rule(rule: SigmaRule, timeframe: str = "now-15m", size: int
 
     return query_body
 
-def translate_correlation_rule(corr_rule: SigmaCorrelationRule, timeframe: Optional[str] = None) -> Dict[str, Any]:
+def translate_correlation_rule(corr_rule: SigmaCorrelationRule, ref_query: Optional[str] = None, timeframe: Optional[str] = None, schema: str = "native") -> Dict[str, Any]:
     # step 1 -- Determine timeframe
     #timespan: 5m
-    if timeframe is not None:
+    if timeframe and timeframe.lower() == "all":
+        tf = None
+    elif timeframe:
         tf = timeframe
     elif corr_rule.timespan and corr_rule.timespan.spec:
         tf = "now-" + str(corr_rule.timespan.spec)
@@ -134,6 +142,16 @@ def translate_correlation_rule(corr_rule: SigmaCorrelationRule, timeframe: Optio
     # step 3 -- Build filter list imperatively
     filters: List[Dict[str, Any]] = []
 
+    #reference query like in the rule you might have: rule: -failed_login and for that youwill need a query
+    if ref_query:
+        filters.append({
+            "query_string": {
+                    "query": ref_query,
+                    "analyze_wildcard": True,
+                    "default_operator": "AND"
+            }
+        })
+
     # add time range filter unless all
     if tf and tf.lower() != "all":
         filters.append({
@@ -145,24 +163,6 @@ def translate_correlation_rule(corr_rule: SigmaCorrelationRule, timeframe: Optio
             }
         })
 
-    # add referenced rules filter
-    '''
-    rules:
-        - failed_logon
-    '''
-    rule_refs: List[str] = []
-    if corr_rule.rules:
-        for i in range(len(corr_rule.rules)):
-            ref_obj = corr_rule.rules[i]
-            rule_refs.append(str(ref_obj.reference))
-
-    if len(rule_refs) > 0:
-        filters.append({
-            "terms": {
-                "rule.name.keyword": rule_refs
-            }
-        })
-
     # step 4 -- Build group-by terms imperatively
     '''
     group-by:
@@ -171,9 +171,8 @@ def translate_correlation_rule(corr_rule: SigmaCorrelationRule, timeframe: Optio
     '''
     terms_list: List[Dict[str, str]] = []
     if corr_rule.group_by:
-        for i in range(len(corr_rule.group_by)):
-            raw_field = corr_rule.group_by[i]
-            mapped = map_field(raw_field)
+        for raw_field in corr_rule.group_by:
+            mapped = map_field(raw_field, schema=schema)
             if not mapped.endswith(".keyword") and not mapped.endswith(".id"):
                 final_field = mapped + ".keyword"
             else:
@@ -181,6 +180,30 @@ def translate_correlation_rule(corr_rule: SigmaCorrelationRule, timeframe: Optio
             terms_list.append({"field": final_field})
 
     # step 5 -- Construct OpenSearch Query DSL with aggregation
+    
+    #only one element in group-by
+    if len(terms_list) == 1:
+            aggs_body = {
+                "terms": {
+                    "field": terms_list[0]["field"],
+                    "min_doc_count": min_count
+                }
+            }
+    elif len(terms_list) > 1:
+        aggs_body = {
+            "multi_terms": {
+                "terms": terms_list,
+                "min_doc_count": min_count
+            }
+        }
+    else:
+        #without group-by
+        aggs_body = {
+            "value_count": {
+                "field": "_id"
+            }
+        }
+
     query_body: Dict[str, Any] = {
         "size": 0,
         "query": {
@@ -189,13 +212,7 @@ def translate_correlation_rule(corr_rule: SigmaCorrelationRule, timeframe: Optio
             }
         },
         "aggs": {
-            "correlation_buckets": {
-                "multi_terms": {
-                    "terms": terms_list,
-                    "min_doc_count": min_count
-                }
-            }
+            "correlation_buckets": aggs_body
         }
     }
-
     return query_body
