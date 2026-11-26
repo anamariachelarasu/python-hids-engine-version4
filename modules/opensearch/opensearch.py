@@ -29,6 +29,7 @@ HIDS_ALERTS_MAPPING = {
             "event_count": {"type": "integer"},
             "time_window_start": {"type": "date"},
             "time_window_end": {"type": "date"},
+        
             "group_key": {
                 "type": "object",
                 "dynamic": True

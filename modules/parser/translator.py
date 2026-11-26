@@ -186,6 +186,7 @@ def translate_correlation_rule(corr_rule: SigmaCorrelationRule, ref_query: Optio
             aggs_body = {
                 "terms": {
                     "field": terms_list[0]["field"],
+                    "size": 1000,
                     "min_doc_count": min_count
                 }
             }

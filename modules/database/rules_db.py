@@ -3,7 +3,7 @@ import json
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Union
+from typing import Any, Dict, Generator, List, Optional, Union, Tuple
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "rules.db"
 
@@ -21,16 +21,35 @@ class RuleRecord:
     group_fields: List[str] = field(default_factory=list)
     threshold_count: int = 1
     schema: str = "native"
+    timespan_seconds: Optional[int] = None
+
+    #my decision as an admin if the rule is active (= 1) or inactive (= 0)
     enabled: int = 0
+
+    logsource_category: Optional[str] = None
+    logsource_service: Optional[str] = None
+    target_channels: List[str] = field(default_factory=list)
+    target_event_ids: List[int] = field(default_factory=list)
+    target_source: str = "unknown"
+    ref_rules: List[str] = field(default_factory=list)
+
     id: Optional[int] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "RuleRecord":
+        keys = row.keys()
         # deserialize stored json fields into python objects
         query_body = json.loads(row["query_body"]) if row["query_body"] else {}
         rule_tags = json.loads(row["rule_tags"]) if row["rule_tags"] else []
         group_fields = json.loads(row["group_fields"]) if row["group_fields"] else []
-
+        target_channels = (json.loads(row["target_channels"]) if "target_channels" in keys and row["target_channels"] else [])
+        target_event_ids = (json.loads(row["target_event_ids"]) if "target_event_ids" in keys and row["target_event_ids"] else [])
+        logsource_category = (row["logsource_category"] if "logsource_category" in keys else None)
+        logsource_service = (row["logsource_service"] if "logsource_service" in keys else None)
+        target_source = (row["target_source"] if "target_source" in keys and row["target_source"] else "unknown")
+        ref_rules = (json.loads(row["ref_rules"]) if "ref_rules" in keys and row["ref_rules"] else [])
+        timespan_seconds = (row["timespan_seconds"] if "timespan_seconds" in keys else None)
+        
         return cls(
             id=row["id"],
             rule_id=row["rule_id"],
@@ -45,6 +64,13 @@ class RuleRecord:
             threshold_count=row["threshold_count"] or 1,
             schema=row["schema"] or "native",
             enabled=row["enabled"],
+            logsource_service=logsource_service,
+            logsource_category=logsource_category,
+            target_channels=target_channels,
+            target_event_ids=target_event_ids,
+            target_source=target_source,
+            ref_rules=ref_rules,
+            timespan_seconds = timespan_seconds,
         )
 
     def to_db_params(self) -> Dict[str, Any]:
@@ -62,6 +88,13 @@ class RuleRecord:
             "threshold_count": self.threshold_count,
             "schema": self.schema,
             "enabled": self.enabled,
+            "logsource_category": self.logsource_category,
+            "logsource_service": self.logsource_service,
+            "target_channels": json.dumps(self.target_channels, ensure_ascii=False),
+            "target_event_ids": json.dumps(self.target_event_ids, ensure_ascii=False),
+            "target_source": self.target_source,
+            "ref_rules": json.dumps(self.ref_rules, ensure_ascii=False),
+            "timespan_seconds": self.timespan_seconds,
         }
 
 
@@ -100,12 +133,47 @@ class RulesDB:
                     threshold_count INTEGER DEFAULT 1,
                     schema TEXT DEFAULT 'native',
                     enabled INTEGER DEFAULT 0,
+                    logsource_category TEXT,
+                    logsource_service TEXT,
+                    target_channels TEXT,
+                    target_event_ids TEXT,
+                    target_source TEXT DEFAULT 'unknown',
+                    ref_rules TEXT,
+                    timespan_seconds INTEGER,
                     UNIQUE(title, source_path, schema)
                 );
                 """
             )
+
+            # migrate existing database tables by adding missing columns
+            cursor = conn.execute("PRAGMA table_info(rules);")
+            existing_cols = {row["name"] for row in cursor.fetchall()}
+
+            migrations = [
+                ("logsource_category", "TEXT"),
+                ("logsource_service", "TEXT"),
+                ("target_channels", "TEXT"),
+                ("target_event_ids", "TEXT"),
+                ("target_source", "TEXT DEFAULT 'unknown'"),
+                ("ref_rules", "TEXT"),
+                ("timespan_seconds", "INTEGER"),
+            ]
+            for col_name, col_def in migrations:
+                if col_name not in existing_cols:
+                    conn.execute(f"ALTER TABLE rules ADD COLUMN {col_name} {col_def};")
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(enabled);")
             conn.commit()
+
+    def get_all_rules(self, schema: Optional[str] = None) -> List[RuleRecord]:
+        # return all rules for profiling or inspection, optionally filtered by schema
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if schema:
+                cursor.execute("SELECT * FROM rules WHERE schema = ? ORDER BY id ASC", (schema,))
+            else:
+                cursor.execute("SELECT * FROM rules ORDER BY id ASC")
+            return [RuleRecord.from_row(row) for row in cursor.fetchall()]
 
     def get_active_rules(self, schema: str = "native") -> List[RuleRecord]:
         # returns only active rules for the given schema
@@ -122,36 +190,10 @@ class RulesDB:
 
         if preserve_enabled:
             sql = """
-                INSERT INTO rules (
-                    rule_id, title, rule_type, level, source_path, rule_tags,
-                    query_body, lucene_query, group_fields, threshold_count,
-                    schema, enabled
-                ) VALUES (
-                    :rule_id, :title, :rule_type, :level, :source_path, :rule_tags,
-                    :query_body, :lucene_query, :group_fields, :threshold_count,
-                    :schema, :enabled
-                )
-                ON CONFLICT(title, source_path, schema) DO UPDATE SET
-                    rule_id = excluded.rule_id,
-                    rule_type = excluded.rule_type,
-                    level = excluded.level,
-                    rule_tags = excluded.rule_tags,
-                    query_body = excluded.query_body,
-                    lucene_query = excluded.lucene_query,
-                    group_fields = excluded.group_fields,
-                    threshold_count = excluded.threshold_count;
-            """
-        else:
-            sql = """
-                INSERT INTO rules (
-                    rule_id, title, rule_type, level, source_path, rule_tags,
-                    query_body, lucene_query, group_fields, threshold_count,
-                    schema, enabled
-                ) VALUES (
-                    :rule_id, :title, :rule_type, :level, :source_path, :rule_tags,
-                    :query_body, :lucene_query, :group_fields, :threshold_count,
-                    :schema, :enabled
-                )
+                INSERT INTO rules (rule_id, title, rule_type, level, source_path, rule_tags, query_body, lucene_query, group_fields, threshold_count, schema, enabled, 
+                                logsource_category, logsource_service, target_channels, target_event_ids, target_source, ref_rules, timespan_seconds) 
+                VALUES (:rule_id, :title, :rule_type, :level, :source_path, :rule_tags, :query_body, :lucene_query, :group_fields, :threshold_count,
+                        :schema, :enabled, :logsource_category, :logsource_service, :target_channels, :target_event_ids, :target_source, :ref_rules, :timespan_seconds)
                 ON CONFLICT(title, source_path, schema) DO UPDATE SET
                     rule_id = excluded.rule_id,
                     rule_type = excluded.rule_type,
@@ -161,7 +203,37 @@ class RulesDB:
                     lucene_query = excluded.lucene_query,
                     group_fields = excluded.group_fields,
                     threshold_count = excluded.threshold_count,
-                    enabled = excluded.enabled;
+                    logsource_category = excluded.logsource_category,
+                    logsource_service = excluded.logsource_service,
+                    target_channels = excluded.target_channels,
+                    target_event_ids = excluded.target_event_ids,
+                    target_source = excluded.target_source,
+                    ref_rules = excluded.ref_rules,
+                    timespan_seconds = excluded.timespan_seconds;
+            """
+        else:
+            sql = """
+                INSERT INTO rules (rule_id, title, rule_type, level, source_path, rule_tags, query_body, lucene_query, group_fields, threshold_count,
+                                   schema, enabled, logsource_category, logsource_service, target_channels, target_event_ids, target_source, ref_rules, timespan_seconds)
+                VALUES (:rule_id, :title, :rule_type, :level, :source_path, :rule_tags, :query_body, :lucene_query, :group_fields, :threshold_count,
+                    :schema, :enabled, :logsource_category, :logsource_service, :target_channels, :target_event_ids, :target_source, :ref_rules, :timespan_seconds)
+                ON CONFLICT(title, source_path, schema) DO UPDATE SET
+                    rule_id = excluded.rule_id,
+                    rule_type = excluded.rule_type,
+                    level = excluded.level,
+                    rule_tags = excluded.rule_tags,
+                    query_body = excluded.query_body,
+                    lucene_query = excluded.lucene_query,
+                    group_fields = excluded.group_fields,
+                    threshold_count = excluded.threshold_count,
+                    enabled = excluded.enabled,
+                    logsource_category = excluded.logsource_category,
+                    logsource_service = excluded.logsource_service,
+                    target_channels = excluded.target_channels,
+                    target_event_ids = excluded.target_event_ids,
+                    target_source = excluded.target_source,
+                    ref_rules = excluded.ref_rules,
+                    timespan_seconds = excluded.timespan_seconds;
             """
 
         params = [r.to_db_params() for r in rules]
@@ -209,4 +281,9 @@ class RulesDB:
                 cursor.execute("SELECT COUNT(*) FROM rules WHERE enabled = 1")
                 active = cursor.fetchone()[0]
 
-            return {"total_rules": total, "active_rules": active, "inactive_rules": total - active,}
+
+            return {
+                "total_rules": total,
+                "active_rules": active,
+                "inactive_rules": total - active,
+                }

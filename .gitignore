@@ -5,3 +5,6 @@ data/alerts/
 modules/opensearch/test_os.py
 modules/parser/correlation_rules.py
 windows.py
+data/group_alerts.py
+.venv
+.vscode

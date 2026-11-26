@@ -1,0 +1,14 @@
+title: Repeated External Remote SMB Logons from Public IP (Possible Brute Force)
+name: repeated_external_remote_smb_logon
+description: Detects multiple external remote SMB logon events from a public IP targeting a user or system.
+level: critical
+correlation:
+    type: event_count
+    rules:
+        - 78d5cab4-557e-454f-9fb9-a222bd0d5edc
+    group-by:
+        - TargetUserName
+        - Hostname
+    timespan: 10m
+    condition:
+        gte: 3

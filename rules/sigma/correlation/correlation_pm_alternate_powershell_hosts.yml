@@ -1,0 +1,13 @@
+title: Repeated Alternate PowerShell Host Invocations
+name: repeated_alternate_powershell_hosts
+description: Detects repeated execution of PowerShell commands inside alternate host processes.
+level: high
+correlation:
+    type: event_count
+    rules:
+        - 64e8e417-c19a-475a-8d19-98ea705394cc
+    group-by:
+        - ComputerName
+    timespan: 10m
+    condition:
+        gte: 5

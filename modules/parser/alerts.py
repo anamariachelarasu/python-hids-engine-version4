@@ -2,6 +2,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import orjson
 
+SEVERITY_ORDER = ["informational", "low", "medium", "high", "critical"]
+
+def severity_rank(level: Optional[str]):
+    try:
+        return SEVERITY_ORDER.index((level or "").lower())
+    except Exception:
+        return 0
+
 @dataclass
 class Alert:
     rule_title: str

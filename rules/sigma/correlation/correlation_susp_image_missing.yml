@@ -1,0 +1,13 @@
+title: High Frequency Of Non-Existing / Ghosted Process Execution
+name: high_freq_susp_image_missing
+description: Detects multiple process creation events lacking disk image paths on the same host within 5 minutes.
+level: critical
+correlation:
+    type: event_count
+    rules:
+        - 71158e3f-df67-472b-930e-7d287acaa3e1
+    group-by:
+        - ComputerName
+    timespan: 5m
+    condition:
+        gte: 3

@@ -1,0 +1,13 @@
+title: Multiple AppX Packages Blocked by AppLocker (Possible Unauthorized Deployment)
+name: multiple_appx_blocked_applocker
+description: Detects repeated AppX package deployment blocks on a single host within a short timeframe.
+level: high
+correlation:
+    type: event_count
+    rules:
+        - 6ae53108-c3a0-4bee-8f45-c7591a2c337f
+    group-by:
+        - Hostname
+    timespan: 5m
+    condition:
+        gte: 5
